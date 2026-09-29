@@ -463,3 +463,9 @@ ESP_LDS_006/
 - Bài phân tích ngược giao thức LDS-006 trên jentsch.io:
   <https://www.jentsch.io/lds-006-lidar-sensor-reverse-engineering/>
 - [ESP-IDF Programming Guide](https://docs.espressif.com/projects/esp-idf/en/v5.5.2/esp32s3/)
+
+---
+
+## Giấy phép
+
+[MIT](LICENSE). Tự do sử dụng, sửa đổi và phân phối, kể cả cho mục đích thương mại.
