@@ -1,0 +1,38 @@
+menu "LDS-006 motor controller"
+
+    config LDS_LIDAR_RX_GPIO
+        int "Lidar TX -> this GPIO (UART1 RX)"
+        range 0 48
+        default 18
+        help
+            Wire the lidar TX through 220R..1k. Avoid GPIO0/3/45/46 (strapping),
+            19/20 (USB) and 26-32 (flash/PSRAM).
+
+    config LDS_ROBOT_RX_GPIO
+        int "Robot TX (robot->lidar commands) -> this GPIO (UART2 RX), -1 = not wired"
+        range -1 48
+        default -1
+        help
+            When wired, the motor only runs between the robot's "startlds$" and
+            "stoplds$". When -1, the motor runs whenever AUTO mode is on.
+
+    config LDS_PWM_GPIO
+        int "PWM output to the MOSFET gate"
+        range 0 48
+        default 16
+        help
+            Outputs are 3.3 V: use a logic-level MOSFET (e.g. AO3400A) and a 10k
+            gate pull-down.
+
+    config LDS_BUTTON_GPIO
+        int "Button: short press toggles the motor, hold 8 s to forget WiFi (-1 = none)"
+        range -1 48
+        default 0
+        help
+            GPIO0 is the BOOT button on most ESP32-S3 boards; reading it after boot is safe.
+
+    config LDS_HOSTNAME
+        string "Hostname (DHCP and mDNS: http://<hostname>.local)"
+        default "lds006"
+
+endmenu

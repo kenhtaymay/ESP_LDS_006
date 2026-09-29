@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LDS-006 Lidar</title>
+<style>
+  :root { --bg:#0f1115; --panel:#181b22; --line:#2a2f3a; --text:#e6e8ee; --muted:#8b93a7;
+          --accent:#4cc38a; --warn:#e5a23a; --bad:#e5534b; }
+  * { box-sizing: border-box; }
+  html, body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--text); font:12px/1.35 system-ui, sans-serif;
+         display:flex; flex-direction:column; }
+  header { display:flex; align-items:center; gap:10px; padding:5px 10px; border-bottom:1px solid var(--line); flex:none; }
+  header h1 { font-size:14px; margin:0; font-weight:600; }
+  .pill { padding:1px 8px; border-radius:999px; font-size:11px; background:var(--line); }
+  .ok { color:var(--accent); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+  /* one screen, no page scroll: the map is a square as tall as the space allows */
+  main { flex:1; min-height:0; display:grid; grid-template-columns:auto minmax(260px,1fr) minmax(260px,1fr);
+         gap:8px; padding:8px; }
+  .col { min-height:0; overflow:auto; display:flex; flex-direction:column; gap:8px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:6px 9px; }
+  .card h2 { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin:0 0 4px; }
+  .mapcard { display:flex; flex-direction:column; align-self:start; }
+  /* sized by fitMap() to the height left in the viewport, so the page never scrolls */
+  #map { display:block; width:300px; height:300px; background:#0b0d11; border-radius:6px; }
+  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:5px; }
+  .row label { color:var(--muted); }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:1px 0; border-bottom:1px solid var(--line); white-space:nowrap; }
+  td:first-child { color:var(--muted); }
+  td:last-child { text-align:right; font-variant-numeric:tabular-nums; overflow:hidden; text-overflow:ellipsis; max-width:180px; }
+  input[type=number] { width:72px; background:#0b0d11; color:var(--text); border:1px solid var(--line);
+         border-radius:5px; padding:2px 5px; font-size:12px; }
+  input[type=range] { width:90px; }
+  button { background:#232834; color:var(--text); border:1px solid var(--line); border-radius:5px; padding:3px 8px;
+           cursor:pointer; font-size:12px; }
+  button:hover { border-color:var(--muted); }
+  button.primary { background:#1f4d37; border-color:#2e7a55; }
+  button.danger { background:#4d1f1f; border-color:#7a2e2e; }
+  .grid3 { display:grid; grid-template-columns:repeat(3, auto); gap:4px 8px; justify-content:start; }
+  .grid3 label { display:flex; align-items:center; gap:5px; color:var(--muted); }
+  .grid3 label input { width:66px; }
+  progress { width:100%; height:8px; }
+  #log, #otaText { color:var(--muted); font-size:11px; min-height:1.3em; }
+  #fw { font-size:11px; max-width:100%; }
+  @media (max-width: 1000px) {
+    body { height:auto; } main { grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>LDS-006 · bộ điều khiển motor</h1>
+  <span id="conn" class="pill bad">mất kết nối</span>
+  <span id="headline" class="pill">—</span>
+</header>
+<main>
+  <div class="card mapcard">
+    <h2>Bản đồ quét thời gian thực</h2>
+    <canvas id="map" width="900" height="900"></canvas>
+    <div class="row">
+      <label>Phạm vi <input id="range" type="range" min="500" max="8000" step="250" value="3000"></label>
+      <span id="rangeText">3.0 m</span>
+      <label>Xoay <input id="rotate" type="range" min="0" max="359" value="0"></label>
+      <label><input id="mirror" type="checkbox" checked> Lật</label>
+      <label><input id="lines" type="checkbox"> Tia</label>
+      <span id="points" class="pill">0 điểm</span>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="card">
+      <h2>Điều khiển motor</h2>
+      <div class="row" style="margin-top:0">
+        <button class="primary" onclick="send('G')">Tự động (G)</button>
+        <button class="danger" onclick="send('X')">Dừng (X)</button>
+        <label>Tốc độ đặt</label><input id="sp" type="number" step="100">
+        <button onclick="send('S ' + val('sp'))">Đặt</button>
+      </div>
+      <div class="row">
+        <label>Motor</label>
+        <button onclick="send('M 1')">Bật</button>
+        <button onclick="send('M 0')">Tắt</button>
+      </div>
+      <div class="row">
+        <label>Duty thủ công</label><input id="manual" type="number" step="1" min="0" max="799">
+        <button onclick="send('P ' + val('manual'))">Chạy vòng hở</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Hiệu chỉnh PID</h2>
+      <div class="grid3">
+        <label>Kp <input id="kp" type="number" step="0.0001"></label>
+        <label>Ki <input id="ki" type="number" step="0.0005"></label>
+        <label>Kd <input id="kd" type="number" step="0.0001"></label>
+        <label>Min <input id="dmin" type="number" step="5"></label>
+        <label>Max <input id="dmax" type="number" step="5"></label>
+        <label>Slew <input id="slew" type="number" step="0.5"></label>
+        <label>PWM Hz <input id="pwmhz" type="number" step="500" min="1300" max="40000"></label>
+      </div>
+      <div class="row">
+        <button onclick="applyPid()">Áp dụng</button>
+        <button class="primary" onclick="applyPid(); setTimeout(() => send('W'), 400)">Áp dụng &amp; lưu</button>
+        <button onclick="fillForm(true)">Nạp lại</button>
+      </div>
+      <div id="log"></div>
+    </div>
+    <div class="card"><h2>Motor</h2><table id="tMotor"></table></div>
+    <div class="card"><h2>Lidar</h2><table id="tLidar"></table></div>
+  </div>
+
+  <div class="col">
+    <div class="card">
+      <h2>WiFi</h2><table id="tWifi"></table>
+      <div class="row"><button class="danger" onclick="forgetWifi()">Quên WiFi &amp; SmartConfig</button></div>
+    </div>
+    <div class="card"><h2>Hệ thống</h2><table id="tSystem"></table></div>
+    <div class="card"><h2>Phần cứng</h2><table id="tHw"></table></div>
+    <div class="card">
+      <h2>Cập nhật firmware (OTA)</h2>
+      <input id="fw" type="file" accept=".bin">
+      <div class="row"><button class="primary" onclick="uploadFw()">Tải lên &amp; khởi động lại</button></div>
+      <progress id="otaProgress" value="0" max="100" hidden></progress>
+      <div id="otaText"></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const val = id => $(id).value;
+let ws, last = null, formFilled = false, distances = new Uint16Array(360);
+
+function log(text) { $('log').textContent = text; }
+
+function send(line) {
+  if (ws && ws.readyState === 1) { ws.send(line); log('Đã gửi: ' + line); }
+  else log('Chưa kết nối');
+}
+
+function applyPid() {
+  send(`K ${val('kp')} ${val('ki')} ${val('kd')}`);
+  setTimeout(() => send(`L ${val('dmin')} ${val('dmax')}`), 80);
+  setTimeout(() => send(`R ${val('slew')}`), 160);
+  setTimeout(() => send(`Q ${val('pwmhz')}`), 240);
+}
+
+function forgetWifi() {
+  if (confirm('Xoá WiFi đã lưu và bật SmartConfig? Trang này sẽ mất kết nối.')) send('C');
+}
+
+function fillForm(force) {
+  if (!last || (formFilled && !force)) return;
+  const c = last.config;
+  $('kp').value = c.kp; $('ki').value = c.ki; $('kd').value = c.kd; $('slew').value = c.slew; $('pwmhz').value = c.pwm_hz;
+  $('dmin').value = c.duty_min; $('dmax').value = c.duty_max; $('sp').value = c.setpoint;
+  formFilled = true;
+}
+
+function table(id, rows) {
+  $(id).innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+}
+
+const fmt = (n, d = 0) => Number(n).toLocaleString('vi-VN', { minimumFractionDigits: d, maximumFractionDigits: d });
+const uptime = s => `${Math.floor(s / 3600)}h ${Math.floor(s / 60) % 60}m ${s % 60}s`;
+
+function showStatus(s) {
+  last = s; fillForm(false);
+  const m = s.motor, l = s.lidar, c = s.config, h = s.hw, w = s.wifi, y = s.system;
+  const good = l.valid_pct >= 95, none = l.frames_per_s === 0;
+  $('headline').textContent = none ? 'lidar im lặng' : `${fmt(l.valid_pct, 1)}% khung hợp lệ · ${m.state}`;
+  $('headline').className = 'pill ' + (none ? 'warn' : good ? 'ok' : 'bad');
+  table('tMotor', [
+    ['Chế độ', m.mode], ['Trạng thái', m.state], ['Tốc độ đặt (đang áp dụng)', fmt(m.setpoint)], ['Tự chạy khi khởi động', c.auto_start ? 'có' : 'không'],
+    ['Tốc độ lọc (median 5)', fmt(m.filtered)], ['Tốc độ thô', fmt(m.raw_speed)],
+    ['Duty', `${fmt(m.duty, 1)} / 799 (${fmt(m.duty_pct, 1)}%)`],
+    ['Robot yêu cầu lidar', m.lidar_wanted ? 'có' : 'không'], ['Số lần khởi động lại (kẹt)', m.restarts],
+  ]);
+  table('tLidar', [
+    ['Khung hợp lệ (1 s)', `<span class="${good ? 'ok' : 'bad'}">${fmt(l.valid_pct, 1)}%</span>`],
+    ['Khung / giây', fmt(l.frames_per_s)], ['Vòng quét / giây', fmt(l.rev_per_s, 2)],
+    ['Tổng khung đo', fmt(l.total_valid)], ['Tổng khung lỗi tốc độ (0xFB)', fmt(l.total_speed_errors)],
+    ['Tổng lỗi checksum', fmt(l.total_bad_checksum)], ['Byte UART đã nhận', fmt(l.raw_bytes)],
+  ]);
+  table('tHw', [
+    ['GPIO RX lidar (UART1)', h.lidar_rx_gpio], ['GPIO RX robot (UART2)', h.robot_rx_gpio < 0 ? 'không dùng' : h.robot_rx_gpio],
+    ['GPIO PWM (MCPWM)', h.pwm_gpio], ['PWM', `${fmt(h.pwm_freq_hz)} Hz, ${h.pwm_ticks} bước`],
+    ['Thang duty', `0 – ${h.duty_scale}`], ['UART lidar', `${h.uart_baud} baud 8N1`],
+  ]);
+  table('tWifi', [
+    ['Trạng thái', w.state], ['SSID', w.ssid || '—'], ['IP', w.ip || '—'],
+    ['RSSI', w.ip ? `${w.rssi} dBm` : '—'], ['Kênh', w.ip ? w.channel : '—'], ['mDNS', `${w.hostname}.local`],
+  ]);
+  table('tSystem', [
+    ['Firmware', `${y.project} ${y.firmware}`], ['Build', y.build], ['ESP-IDF', y.idf], ['Chip', y.chip],
+    ['Thời gian chạy', uptime(y.uptime_s)], ['RAM trống / thấp nhất', `${fmt(y.free_heap)} / ${fmt(y.min_free_heap)} B`],
+    ['Lý do khởi động lại', y.reset_reason], ['Phân vùng đang chạy', y.partition],
+  ]);
+}
+
+// ---- scan map
+const canvas = $('map'), ctx = canvas.getContext('2d');
+function drawMap() {
+  const W = canvas.width, cx = W / 2, cy = W / 2, range = Number(val('range')), scale = (W / 2 - 10) / range;
+  const rot = Number(val('rotate')) * Math.PI / 180;
+  const mirror = $('mirror').checked;
+  ctx.fillStyle = '#0b0d11'; ctx.fillRect(0, 0, W, W);
+  ctx.strokeStyle = '#1f2430'; ctx.fillStyle = '#5c6478'; ctx.font = '20px system-ui'; ctx.lineWidth = 1;
+  const step = range > 4000 ? 1000 : 500;
+  for (let r = step; r <= range; r += step) {
+    ctx.beginPath(); ctx.arc(cx, cy, r * scale, 0, 2 * Math.PI); ctx.stroke();
+    ctx.fillText((r / 1000).toFixed(1) + ' m', cx + 4, cy - r * scale + 20);
+  }
+  ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, W); ctx.moveTo(0, cy); ctx.lineTo(W, cy); ctx.stroke();
+  let count = 0;
+  for (let a = 0; a < 360; a++) {
+    const d = distances[a];
+    if (!d || d > range) continue;
+    // mirrored: angles grow counter-clockwise on screen (the head's scan direction)
+    const t = (mirror ? -a : a) * Math.PI / 180 + rot;
+    const x = cx + Math.sin(t) * d * scale, y = cy - Math.cos(t) * d * scale;
+    if ($('lines').checked) { ctx.strokeStyle = '#26402f'; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y); ctx.stroke(); }
+    ctx.fillStyle = '#57d18f'; ctx.beginPath(); ctx.arc(x, y, 3.5, 0, 2 * Math.PI); ctx.fill();
+    count++;
+  }
+  ctx.fillStyle = '#e5534b'; ctx.beginPath(); ctx.arc(cx, cy, 6, 0, 2 * Math.PI); ctx.fill();
+  $('points').textContent = count + ' điểm';
+}
+function fitMap() {
+  const narrow = window.innerWidth <= 1000;
+  const mainEl = document.querySelector('main');
+  // main's height minus its padding, the card's title, slider row and padding
+  const avail = mainEl.clientHeight - 16 - 58;
+  const side = Math.floor(narrow ? window.innerWidth - 40 : Math.max(220, Math.min(avail, window.innerWidth * 0.6)));
+  canvas.style.width = canvas.style.height = side + 'px';
+}
+window.addEventListener('resize', fitMap);
+fitMap();
+
+$('range').oninput = () => { $('rangeText').textContent = (val('range') / 1000).toFixed(1) + ' m'; drawMap(); };
+// remember the view (mirror, rotation) per browser; storage may be unavailable
+function saveView() {
+  try { localStorage.setItem('ldsView', JSON.stringify({ mirror: $('mirror').checked, rotate: val('rotate') })); } catch (e) { }
+}
+try {
+  const v = JSON.parse(localStorage.getItem('ldsView') || 'null');
+  if (v) { $('mirror').checked = !!v.mirror; $('rotate').value = v.rotate; }
+} catch (e) { }
+$('rotate').oninput = () => { saveView(); drawMap(); };
+$('mirror').onchange = () => { saveView(); drawMap(); };
+$('lines').onchange = drawMap;
+
+// ---- websocket
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => { $('conn').textContent = 'đã kết nối'; $('conn').className = 'pill ok'; };
+  ws.onclose = () => { $('conn').textContent = 'mất kết nối'; $('conn').className = 'pill bad'; setTimeout(connect, 1500); };
+  ws.onmessage = ev => {
+    if (typeof ev.data === 'string') {
+      try { const m = JSON.parse(ev.data); if (m.type === 'status') showStatus(m); } catch (e) { }
+      return;
+    }
+    const dv = new DataView(ev.data);
+    if (ev.data.byteLength < 4 + 720 || dv.getUint32(0, true) !== 0x4E414353) return;
+    for (let a = 0; a < 360; a++) distances[a] = dv.getUint16(4 + a * 2, true);
+    drawMap();
+  };
+}
+// keepalive, so a manual (HOST) duty is not stopped by the firmware's 3 s timeout
+setInterval(() => { if (ws && ws.readyState === 1) ws.send('A'); }, 1000);
+
+// ---- OTA
+function uploadFw() {
+  const file = $('fw').files[0];
+  if (!file) { $('otaText').textContent = 'Chọn file .bin trước'; return; }
+  const xhr = new XMLHttpRequest();
+  $('otaProgress').hidden = false;
+  xhr.upload.onprogress = e => { if (e.lengthComputable) $('otaProgress').value = 100 * e.loaded / e.total; };
+  xhr.onload = () => {
+    $('otaText').textContent = xhr.status === 200 ? xhr.responseText + ' — trang sẽ tự kết nối lại.' : 'Lỗi: ' + xhr.responseText;
+  };
+  xhr.onerror = () => { $('otaText').textContent = 'Tải lên thất bại'; };
+  xhr.open('POST', '/ota');
+  xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+  xhr.send(file);
+  $('otaText').textContent = `Đang tải ${fmt(file.size)} byte…`;
+}
+
+drawMap();
+connect();
+</script>
+</body>
+</html>

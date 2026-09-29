@@ -1,0 +1,24 @@
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_FREERTOS_HZ=1000
+
+# The USB Serial/JTAG port carries our line protocol (usb_serial_jtag driver), so keep
+# ESP_LOG / boot output off it: console on UART0 (GPIO43/44, unconnected), no secondary.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+
+# OTA: two app slots, and roll back to the previous app if a new one never confirms itself
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# Web page: WebSocket for the live map and commands; browsers send long headers
+CONFIG_HTTPD_WS_SUPPORT=y
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+
+# Robot TX (robot->lidar commands startlds$/stoplds$) sniffed on UART2 RX
+CONFIG_LDS_ROBOT_RX_GPIO=17
+
+# PWM to the MOSFET gate (was GPIO16, then 47)
+CONFIG_LDS_PWM_GPIO=8
